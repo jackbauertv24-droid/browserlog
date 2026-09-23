@@ -1,0 +1,20 @@
+[Unit]
+Description=browserlog - WebDriver BiDi observer for the noVNC Firefox
+After=firefox.service
+BindsTo=firefox.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+Environment=HOME=/home/ubuntu
+WorkingDirectory=/home/ubuntu/browserlog
+ExecStartPre=/bin/bash -c "for i in $(seq 1 30); do (exec 3<>/dev/tcp/127.0.0.1/9222) 2>/dev/null && exit 0; sleep 1; done; exit 1"
+ExecStart=/home/ubuntu/.nvm/versions/node/v24.21.0/bin/node /home/ubuntu/browserlog/logger.mjs
+Restart=always
+RestartSec=5
+MemoryMax=200M
+
+[Install]
+WantedBy=firefox.service

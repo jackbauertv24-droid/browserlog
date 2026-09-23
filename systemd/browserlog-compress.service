@@ -1,0 +1,6 @@
+[Unit]
+Description=Compress browserlog JSONL files older than today
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/home/ubuntu/browserlog/compress-old.sh

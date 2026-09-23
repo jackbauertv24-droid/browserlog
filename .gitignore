@@ -1,0 +1,7 @@
+# Captured logs — contain cookies, tokens and page content. Never commit.
+data/
+*.jsonl
+*.jsonl.zst
+
+# Dependencies
+node_modules/
