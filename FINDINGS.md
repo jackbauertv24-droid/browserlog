@@ -118,6 +118,23 @@ adapter, without modifying the working browserlog/routing:
 Only when A/B/C are green do we build. Freeze what works; the broker is additive;
 no adapter code until the probes pass with logged evidence.
 
+## Progress log (milestones)
+
+- **M1 — observation.** browserlog captures all traffic/events/bodies from a
+  human-driven session (the original logger).
+- **M2 — control role added (Probe A green).** The logger now also exposes a
+  localhost-only control endpoint (`127.0.0.1:9223`, POST JSON) that drives the
+  *same* single BiDi session on demand: `eval` (run JS in the page), `perform`
+  (raw `input.performActions`), `navigate`, `shot`, `tabs`. Observation is
+  unchanged and additive; every control command is logged as `t:"ctrl"`. This
+  proves one BiDi client can both observe and send — confirmed by an `eval`
+  returning the page title through the observing session. Also made restart-safe:
+  graceful shutdown closes the WebSocket so Firefox frees its single session
+  slot, plus a session-acquire retry — fixing the "max sessions" zombie wedge
+  that otherwise appears on every restart. Next: use `eval`/`perform` to
+  experiment with sending into ChatGPT's composer and let browserlog record the
+  whole resulting behaviour (no capture code yet).
+
 ## Infrastructure lessons (generic)
 
 - **Tailscale exit node + inbound SSH.** Routing a cloud box's whole egress

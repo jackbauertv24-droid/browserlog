@@ -3,15 +3,19 @@
 // (headers, cookies, status, timing) and console entry, plus response and
 // streamed bodies captured by an in-page tap. One JSONL file per UTC day.
 //
-// Runs as a systemd service bound to firefox.service. It only observes; it
-// never sends input to the browser.
+// Runs as a systemd service bound to firefox.service. Observation is passive.
+// It also exposes a localhost-only control endpoint that can drive the SAME
+// BiDi session on demand (eval, input, screenshot) so experiments can be run
+// through the one allowed session; every control command is logged too.
 import WebSocket from "ws";
+import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
 const ENDPOINT = process.env.BIDI_URL || "ws://127.0.0.1:9222/session";
 const DATA = process.env.BROWSERLOG_DIR || path.join(os.homedir(), "browserlog", "data");
+const CTRL_PORT = Number(process.env.BROWSERLOG_CTRL_PORT || 9223);
 const TAP = fs.readFileSync(path.join(import.meta.dirname, "tap.js"), "utf8");
 
 fs.mkdirSync(DATA, { recursive: true });
@@ -60,6 +64,60 @@ function onEvent(m) {
   }
 }
 
+// ---- control endpoint (localhost only) ----------------------------------
+// Drives the same BiDi session on demand. POST JSON {cmd, ...} to
+// http://127.0.0.1:CTRL_PORT. This is additive; it never affects observation.
+async function firstContext() {
+  const t = await send("browsingContext.getTree", {});
+  return t.contexts?.[0]?.context;
+}
+async function handleControl(m) {
+  switch (m.cmd) {
+    case "tabs":
+      return await send("browsingContext.getTree", {});
+    case "eval": {
+      const ctx = m.context || await firstContext();
+      const fn = m.fn || `() => { return (${m.expr}); }`;
+      return await send("script.callFunction", { functionDeclaration: fn, target: { context: ctx }, awaitPromise: m.await !== false });
+    }
+    case "perform": {
+      // raw input.performActions passthrough: { context?, actions:[...] }
+      const ctx = m.context || await firstContext();
+      return await send("input.performActions", { context: ctx, actions: m.actions });
+    }
+    case "shot": {
+      const ctx = m.context || await firstContext();
+      return await send("browsingContext.captureScreenshot", { context: ctx });
+    }
+    case "navigate": {
+      const ctx = m.context || await firstContext();
+      return await send("browsingContext.navigate", { context: ctx, url: m.url, wait: m.wait || "complete" });
+    }
+    default:
+      throw new Error("unknown cmd: " + m.cmd);
+  }
+}
+function startControl() {
+  http.createServer((req, res) => {
+    if (req.method !== "POST") { res.writeHead(405); return res.end("POST only\n"); }
+    let body = "";
+    req.on("data", (c) => { body += c; if (body.length > 5e6) req.destroy(); });
+    req.on("end", async () => {
+      let m; try { m = JSON.parse(body || "{}"); } catch { res.writeHead(400); return res.end('{"error":"bad json"}'); }
+      write({ t: "ctrl", cmd: m.cmd, arg: m.expr || m.url || (m.actions ? "actions" : undefined), ts: Date.now() });
+      try {
+        const out = await handleControl(m);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(out));
+      } catch (e) {
+        write({ t: "ctrl-err", cmd: m.cmd, error: String(e), ts: Date.now() });
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+    });
+  }).listen(CTRL_PORT, "127.0.0.1", () => process.stderr.write("control on 127.0.0.1:" + CTRL_PORT + "\n"));
+}
+
 async function main() {
   ws = new WebSocket(ENDPOINT);
   ws.on("message", (d) => { const m = JSON.parse(d);
@@ -70,7 +128,17 @@ async function main() {
   ws.on("error", (e) => { process.stderr.write("ws error " + e.message + "\n"); process.exit(1); });
   await new Promise((r, j) => { ws.once("open", r); ws.once("error", j); });
 
-  const s = await send("session.new", { capabilities: {} });
+  // Acquire the single BiDi session, retrying briefly in case a just-killed
+  // predecessor's session is still being released by Firefox.
+  let s;
+  for (let attempt = 1; ; attempt++) {
+    try { s = await send("session.new", { capabilities: {} }); break; }
+    catch (e) {
+      if (attempt >= 8) throw e;
+      process.stderr.write("session.new retry " + attempt + ": " + e.message + "\n");
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
   session = s.sessionId;
   await send("session.subscribe", { events: [
     "browsingContext.contextCreated", "browsingContext.load", "browsingContext.domContentLoaded",
@@ -81,5 +149,12 @@ async function main() {
     arguments: [{ type: "channel", value: { channel: "browserlog" } }] });
   write({ t: "meta", ev: "started", session, ff: s.capabilities?.browserVersion, ts: Date.now() });
   process.stderr.write("browserlog started, session " + session?.slice(0,8) + "\n");
+  startControl();
 }
+// Graceful shutdown: close the WebSocket so Firefox releases the single BiDi
+// session immediately, instead of leaving a zombie that blocks the next start.
+for (const sig of ["SIGTERM", "SIGINT"]) {
+  process.on(sig, () => { try { ws?.close(); } catch {} setTimeout(() => process.exit(0), 400); });
+}
+
 main().catch((e) => { process.stderr.write("fatal " + e.message + "\n"); process.exit(1); });
