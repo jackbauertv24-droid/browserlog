@@ -149,6 +149,23 @@ no adapter code until the probes pass with logged evidence.
   Still to build: real-time isolation of *this* send's reply stream from
   concurrent traffic, and wrapping the loop as the broker's `send()`/`reply()`.
 
+- **M4 — `ask` CLI (minimal working adapter).** `ask.mjs` implements the agreed
+  design end to end and is additive (talks only to the control endpoint + reads
+  the log; does not modify the logger). Flow: type the question into the composer
+  and press Enter; wait for completion via the **log** marker
+  (`message_stream_complete`/`end_turn`); extract the reply from the **DOM**
+  (`[class*=MarkdownRoot]`, last block, `innerText`); on empty extraction or no
+  completion, print `HANDOFF: <reason>`; the wait timeout is **inactivity-based**
+  (reset by ongoing stream activity) so slow/"thinking" replies aren't cut off,
+  with an absolute hard cap. Verified live: `node ask.mjs "..."` returned a
+  correct complete answer. Design rationale (decided by challenging the plan):
+  don't chase an "unbreakable" surface — depend on the stable invariant (the
+  answer is shown as text), keep one simple extraction path, and **fail loud to
+  handoff** rather than ever return silently-wrong text; when it breaks, the
+  read-only probe workflow re-discovers the new markup cheaply. The reply is a
+  JSON-patch `delta_encoding` stream in the log, so a raw grep would not
+  reconstruct it — reading the browser-assembled DOM text avoids that entirely.
+
 ## Infrastructure lessons (generic)
 
 - **Tailscale exit node + inbound SSH.** Routing a cloud box's whole egress
