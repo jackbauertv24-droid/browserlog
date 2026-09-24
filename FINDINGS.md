@@ -135,6 +135,20 @@ no adapter code until the probes pass with logged evidence.
   experiment with sending into ChatGPT's composer and let browserlog record the
   whole resulting behaviour (no capture code yet).
 
+- **M3 — send loop proven (Probes B + C green).** Read-only DOM inspection first:
+  ChatGPT's composer is a single `<div contenteditable="true" role="textbox">`
+  with class `ProseMirror` and placeholder "Ask ChatGPT", inside a `<form>`; the
+  send button only renders once there is text. Then a real send via the control
+  endpoint: focus the composer, type the message with **real keystrokes**
+  (`input.performActions` — ProseMirror ignores naive `textContent` writes), and
+  press **Enter** (``) to submit. Result: a genuine `/f/conversation`
+  send, the SSE reply streamed and was captured by browserlog with clean
+  completion markers, and the answer rendered on screen — with **no challenge or
+  ban** on a logged-in session with BiDi on. This validates the whole control
+  loop end to end (type → send → stream → complete) before any adapter code.
+  Still to build: real-time isolation of *this* send's reply stream from
+  concurrent traffic, and wrapping the loop as the broker's `send()`/`reply()`.
+
 ## Infrastructure lessons (generic)
 
 - **Tailscale exit node + inbound SSH.** Routing a cloud box's whole egress
