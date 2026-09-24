@@ -177,13 +177,17 @@ no adapter code until the probes pass with logged evidence.
   Lesson: pure log-inactivity is not a reliable "stalled" signal; a positive
   "still generating" signal from the page is needed. (Short replies ran ~10s,
   long ones ~30s, so real slowness exists but steady streaming is fine.)
-  Fix (implemented): ChatGPT shows a **Stop button while a reply is streaming**
-  (confirmed by DOM polling: present at 2–4s, gone once complete). `ask` now, when
-  the log goes quiet past the inactivity window, checks for the Stop button —
-  present means generation is only paused, so it keeps waiting; gone without a
-  completion marker means a real stall/handoff. A hard cap still bounds it, and a
-  `ctrl` call timeout was added so the check can't hang. Confirmed: a 2139-char
-  reply taking 42s now returns cleanly instead of a false handoff.
+  Fix (final): a **single deterministic timeout**, not a heuristic. First attempt
+  used ChatGPT's Stop button as a "still generating" signal (present at 2–4s, gone
+  at completion) to keep waiting through pauses — it worked (a 2139-char/42s reply
+  returned cleanly) but was rejected on reflection: it adds a dependency on
+  ChatGPT's DOM, which changes often, so it trades a controllable knob for a
+  fragile external signal. The design now: return promptly on the completion
+  marker we already read; otherwise hand off after one fixed, tunable timeout
+  (`ASK_TIMEOUT_MS`, default 120s). Success stays fast (~21s observed for a normal
+  reply); failure is predictable ("always N seconds to die"), depends on nothing
+  external, and is one knob to tune. A `ctrl` call timeout is kept so no single
+  control call can hang, which supports the same determinism.
 
 ## Infrastructure lessons (generic)
 

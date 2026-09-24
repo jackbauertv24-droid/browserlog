@@ -2,14 +2,14 @@
 // reply text when the stream completes. Additive: it only talks to browserlog's
 // localhost control endpoint and reads the log; it does not modify the logger.
 //
-// Flow (matches the agreed design):
+// Flow (deterministic, minimal-dependency):
 //   1. type the question into the composer + Enter (via control endpoint)
-//   2. wait for completion using the LOG marker (message_stream_complete)
+//   2. wait for completion using the LOG marker (message_stream_complete/end_turn)
 //   3. extract the reply from the DOM ([class*=MarkdownRoot], last block)
-//   4. on any failure (no completion, empty extraction) -> request HANDOFF
-//   5. if the log goes quiet, only stall if the Stop button is gone; a reply
-//      that pauses mid-generation still shows Stop, so we keep waiting (this
-//      fixes false handoffs on slow/long replies), bounded by a hard cap.
+//   4. on empty extraction, or if no reply within a single fixed timeout
+//      (ASK_TIMEOUT_MS, default 120s) -> request HANDOFF
+// No page-state heuristics: success is prompt via the completion marker; failure
+// is a predictable, tunable timeout.
 //
 // Usage: node ask.mjs "your question"
 import http from "node:http";
@@ -19,8 +19,9 @@ import os from "node:os";
 
 const CTRL = { host: "127.0.0.1", port: Number(process.env.BROWSERLOG_CTRL_PORT || 9223) };
 const DATA = process.env.BROWSERLOG_DIR || path.join(os.homedir(), "browserlog", "data");
-const INACTIVITY_MS = Number(process.env.ASK_INACTIVITY_MS || 20000); // no stream activity => stalled
-const HARD_CAP_MS = Number(process.env.ASK_HARD_CAP_MS || 240000);    // absolute safety cap
+// Single deterministic timeout: return promptly on the completion marker, else
+// hand off after this fixed, tunable window. No page-state heuristics.
+const TIMEOUT_MS = Number(process.env.ASK_TIMEOUT_MS || 120000);
 
 function ctrl(obj, timeoutMs = 30000) {
   return new Promise((res, rej) => {
@@ -47,15 +48,6 @@ function keyActions(text) {
 
 const EXTRACT_FN =
   '() => { const b=[...document.querySelectorAll("[class*=MarkdownRoot]")]; const last=b[b.length-1]; return last ? (last.innerText||"") : ""; }';
-// Positive "still generating" signal: ChatGPT shows a Stop button while a reply
-// is streaming (confirmed present during generation, gone at completion). Used so
-// a mid-generation pause longer than the inactivity window is not a false stall.
-const GENERATING_FN =
-  '() => [...document.querySelectorAll("button")].some(b => (b.getAttribute("aria-label")||"").toLowerCase().includes("stop"))';
-async function stillGenerating() {
-  try { return evalResult(await ctrl({ cmd: "eval", fn: GENERATING_FN }, 8000)) === true; }
-  catch { return true; } // on eval error, assume still generating (fail-safe; hard cap bounds it)
-}
 
 async function main() {
   const question = process.argv.slice(2).join(" ").trim();
@@ -66,27 +58,15 @@ async function main() {
   await ctrl({ cmd: "perform", actions: keyActions(question) });
 
   const started = Date.now();
-  let lastActivity = Date.now();
-  let seenActivity = false;
   for (;;) {
     await new Promise((r) => setTimeout(r, 1500));
     const chunk = readSince(startOffset);
-    // any chatgpt stream activity resets the inactivity clock
-    const activity = (chunk.match(/"k":"fetch-chunk"[^\n]*chatgpt\.com|chatgpt\.com[^\n]*"k":"fetch-chunk"/g) || []).length;
-    if (activity > 0) { lastActivity = Date.now(); seenActivity = true; }
-
     if (chunk.includes("message_stream_complete") || chunk.includes('"end_turn"')) {
       const out = evalResult(await ctrl({ cmd: "eval", fn: EXTRACT_FN }));
       if (out && out.trim()) { process.stdout.write(out.trim() + "\n"); process.exit(0); }
       handoff("stream completed but DOM extraction was empty (markup may have shifted)");
     }
-    if (seenActivity && Date.now() - lastActivity > INACTIVITY_MS) {
-      // log went quiet: only a stall if generation has actually stopped. A long
-      // reply that pauses mid-generation still shows the Stop button, so keep waiting.
-      if (await stillGenerating()) lastActivity = Date.now();
-      else handoff("stream stopped without completing (possible challenge or error)");
-    }
-    if (Date.now() - started > HARD_CAP_MS) handoff("no completion within hard cap");
+    if (Date.now() - started > TIMEOUT_MS) handoff("no reply within " + Math.round(TIMEOUT_MS / 1000) + "s");
   }
 }
 function handoff(reason) { process.stdout.write("HANDOFF: " + reason + "\n"); process.exit(3); }
