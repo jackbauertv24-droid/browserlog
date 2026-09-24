@@ -201,18 +201,6 @@ no adapter code until the probes pass with logged evidence.
   Options if it bites: raise `ASK_TIMEOUT_MS`, or relieve memory (stop the desktop
   when idle / move to a 2 GB plan).
 
-- **Extraction render-race (fixed).** Intermittent false HANDOFFs ("extraction
-  empty") occurred even though the reply completed and looked fine in noVNC. Cause:
-  completion is a NETWORK signal (SSE marker in the log), but the DOM finishes
-  painting the reply a beat later — and `ask` extracted exactly once, immediately,
-  with no retry, so under memory pressure it read an empty block and bailed. Fix:
-  on completion, poll the DOM extraction for a bounded window
-  (`ASK_EXTRACT_WAIT_MS`, default 10s, every 0.5s) until non-empty; only hand off
-  if still empty. Deterministic and bounded, no new page-signal dependency.
-  Confirmed by tests returning cleanly. Also noted today: ChatGPT is emitting
-  `message_stream_complete` but not `end_turn` — `ask` watches for either, so it's
-  unaffected, but completion markers do vary over time.
-
 ## Infrastructure lessons (generic)
 
 - **Tailscale exit node + inbound SSH.** Routing a cloud box's whole egress
