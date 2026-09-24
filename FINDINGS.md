@@ -166,6 +166,25 @@ no adapter code until the probes pass with logged evidence.
   JSON-patch `delta_encoding` stream in the log, so a raw grep would not
   reconstruct it — reading the browser-assembled DOM text avoids that entirely.
 
+- **Slow-reply false handoff (found by testing M4, then fixed).** Firing a few
+  realistic tests to confirm M4 surfaced a real bug. Evidence: a "day trips from
+  Tokyo" reply (1669 chars, a markdown table) returned correctly in ~30s, but a
+  "5-day Tokyo itinerary" reply **generated fully** (1791 chars, `end_turn` in
+  the log, complete in the DOM) yet `ask` reported HANDOFF. Cause: the reply
+  handling declared "stream went silent" purely from ~20s of log inactivity, but
+  a long/complex reply can pause mid-generation for longer than that window and
+  then finish fine — so the fixed inactivity timeout produced a false handoff.
+  Lesson: pure log-inactivity is not a reliable "stalled" signal; a positive
+  "still generating" signal from the page is needed. (Short replies ran ~10s,
+  long ones ~30s, so real slowness exists but steady streaming is fine.)
+  Fix (implemented): ChatGPT shows a **Stop button while a reply is streaming**
+  (confirmed by DOM polling: present at 2–4s, gone once complete). `ask` now, when
+  the log goes quiet past the inactivity window, checks for the Stop button —
+  present means generation is only paused, so it keeps waiting; gone without a
+  completion marker means a real stall/handoff. A hard cap still bounds it, and a
+  `ctrl` call timeout was added so the check can't hang. Confirmed: a 2139-char
+  reply taking 42s now returns cleanly instead of a false handoff.
+
 ## Infrastructure lessons (generic)
 
 - **Tailscale exit node + inbound SSH.** Routing a cloud box's whole egress
