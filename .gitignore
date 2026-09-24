@@ -5,3 +5,6 @@ data/
 
 # Dependencies
 node_modules/
+
+# Environment-specific notes (IPs, hostnames, accounts) — never publish
+*.local.md
