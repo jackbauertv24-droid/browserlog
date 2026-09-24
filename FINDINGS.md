@@ -189,6 +189,18 @@ no adapter code until the probes pass with logged evidence.
   external, and is one knob to tune. A `ctrl` call timeout is kept so no single
   control call can hang, which supports the same determinism.
 
+- **Checkpoint test evidence (deterministic-timeout `ask`).** Five tests: short
+  replies returned in 19s and 45s; long replies (2965 and 2104 chars) in 135s and
+  106s; and a forced 3s timeout produced a clean deterministic
+  `HANDOFF: no reply within 3s`. All correct. Caveat surfaced: the box was under
+  **memory pressure** at the time (≈183 MB free, ≈1 GB swap used, PSI avg300
+  ≈17%, Firefox ≈462 MB on a 909 MB box), which inflated latency — a *short* reply
+  taking 45s is abnormal and environmental, not a code defect. Consequence: the
+  120s default timeout is comfortable on a healthy box but tight under memory
+  pressure (a long reply hit ~135s wall-clock, mostly slow control-call overhead).
+  Options if it bites: raise `ASK_TIMEOUT_MS`, or relieve memory (stop the desktop
+  when idle / move to a 2 GB plan).
+
 ## Infrastructure lessons (generic)
 
 - **Tailscale exit node + inbound SSH.** Routing a cloud box's whole egress
