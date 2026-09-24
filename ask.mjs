@@ -22,6 +22,9 @@ const DATA = process.env.BROWSERLOG_DIR || path.join(os.homedir(), "browserlog",
 // Single deterministic timeout: return promptly on the completion marker, else
 // hand off after this fixed, tunable window. No page-state heuristics.
 const TIMEOUT_MS = Number(process.env.ASK_TIMEOUT_MS || 120000);
+// After the network completion marker, the DOM may still be painting the reply.
+// Poll extraction for this bounded window before giving up (fixes the render race).
+const EXTRACT_WAIT_MS = Number(process.env.ASK_EXTRACT_WAIT_MS || 10000);
 
 function ctrl(obj, timeoutMs = 30000) {
   return new Promise((res, rej) => {
@@ -62,9 +65,15 @@ async function main() {
     await new Promise((r) => setTimeout(r, 1500));
     const chunk = readSince(startOffset);
     if (chunk.includes("message_stream_complete") || chunk.includes('"end_turn"')) {
-      const out = evalResult(await ctrl({ cmd: "eval", fn: EXTRACT_FN }));
-      if (out && out.trim()) { process.stdout.write(out.trim() + "\n"); process.exit(0); }
-      handoff("stream completed but DOM extraction was empty (markup may have shifted)");
+      // Completion is a NETWORK signal; the DOM may still be painting the reply.
+      // Poll extraction briefly until it is non-empty (fixes the render race).
+      const extractDeadline = Date.now() + EXTRACT_WAIT_MS;
+      for (;;) {
+        const out = evalResult(await ctrl({ cmd: "eval", fn: EXTRACT_FN }));
+        if (out && out.trim()) { process.stdout.write(out.trim() + "\n"); process.exit(0); }
+        if (Date.now() > extractDeadline) handoff("stream completed but reply never appeared in the DOM (markup may have shifted)");
+        await new Promise((r) => setTimeout(r, 500));
+      }
     }
     if (Date.now() - started > TIMEOUT_MS) handoff("no reply within " + Math.round(TIMEOUT_MS / 1000) + "s");
   }
