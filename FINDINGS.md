@@ -23,6 +23,32 @@ exposes a CLI/API that:
 The always-on browser is the primary path; hand driving in noVNC is the
 least-preferred fallback.
 
+## Project status: SUSPENDED (memory-blocked)
+
+The project is paused pending a resolution to the memory constraint.
+
+- **Root cause:** ChatGPT's single-page app needs roughly 0.9–1.2 GB of Firefox
+  memory. On the ~909 MB host this forces constant swapping, and under that load
+  the browser can no longer service commands in time — control-endpoint `eval`s
+  time out (a trivial `focus()` exceeded 30s), and replies do not render within
+  the timeout. So the adapter cannot run *reliably*, independent of its logic. A
+  long accumulated chat makes it worse (Firefox observed at ~1.2 GB); even a fresh
+  empty chat leaves Firefox around 0.8–0.9 GB because the app itself is heavy.
+- **Completion logic:** the confidence-model completion detection (visible
+  signals — Stop control present/absent + reply-text stability — combined into a
+  confidence score, with the timeout as a final judgement rather than a dumb
+  fail) is implemented in `ask.mjs` but **UNVERIFIED**: it could not be tested
+  because the starved box's evals time out. Do not treat it as working until
+  verified on a non-starved environment.
+- **Constraint:** a larger host (e.g. 2 GB) is not an option for now. Resuming
+  therefore needs the memory solved another way — a lighter browser/site
+  footprint, keeping chats short, or a different host.
+- **System reverted to a text-only baseline** (see the deployment notes): the
+  Tailscale exit node was cleared (egress back to the datacenter path), the
+  exitfix policy-routing was disabled and its rules removed, and the desktop
+  stack (Firefox / noVNC / Xvfb / etc.) was stopped and disabled at boot. The
+  host now runs text-only services with memory free for other use.
+
 ## Bot-detection findings (the big lessons)
 
 These systems gate on two independent signals, and they bite at different times:
