@@ -1,0 +1,11 @@
+[Unit]
+Description=exitfix - pin inbound-connection replies to ens5 (asym-routing fix for Tailscale exit node)
+After=tailscaled.service network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/home/ubuntu/exitfix-rules.sh
+ExecStop=/bin/bash -c "ip rule del fwmark 0x1/0x1 priority 5200 lookup 100 2>/dev/null; ip route flush table 100 2>/dev/null; iptables -t mangle -D PREROUTING -i ens5 -m conntrack --ctstate NEW -j CONNMARK --set-xmark 0x1/0x1 2>/dev/null; iptables -t mangle -D OUTPUT -m cgroup --path system.slice/cloudflared.service -j CONNMARK --set-xmark 0x1/0x1 2>/dev/null; iptables -t mangle -D OUTPUT -j CONNMARK --restore-mark --nfmask 0x1 --ctmask 0x1 2>/dev/null"
+[Install]
+WantedBy=multi-user.target
