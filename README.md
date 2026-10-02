@@ -78,3 +78,9 @@ the Node binary location to your host before installing.
 ## License
 
 ISC
+
+## More
+
+- `BIDI.md` — how to turn BiDi on/off, talk to it, debug it, and the lessons learned.
+- `FINDINGS.md` — research log and project status.
+- `DEPLOY.md` — networking/routing setup for reproduction.
